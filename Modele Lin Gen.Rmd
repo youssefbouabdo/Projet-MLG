@@ -1,0 +1,241 @@
+---
+title: "MLG Projet"
+author: "Youssef Bou Abdo"
+date: "2023-07-06"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+library(dplyr)
+library(MASS)
+library(corrplot)
+library(ggplot2)
+library(dplyr)
+library(performance)
+library(caret)
+```
+
+
+
+
+#Modèle linéaire généralisé avec toutes les variables : 
+
+```{r, echo}
+rm(list=ls())
+setwd("C:/Users/youssef/Desktop/myfolder")
+
+
+# Charger les données train_data 
+d <- read.csv("meteo.train.csv") 
+
+# Effacer les colonnes "Hour" et "Minutes" qui ne contiennet que des zéros
+d <- d[, !(names(d) %in% c("Hour", "Minute"))]
+
+
+# Validation croisée
+set.seed(123)  
+tr <- sample(c(TRUE, FALSE), nrow(d), replace = TRUE, prob = c(0.8, 0.2))
+
+d_train <- d[tr, ]
+dim(d_train)
+
+d_test <- d[!tr, ]
+dim(d_test)
+
+
+```
+
+Puisque l'objectif est de prévoir si demain il va pleuvoir ou non (binomial), le modèle que nous allons adopter est est la regréssion logistique.
+
+
+# Tableau de corrélation
+
+
+```{r, echo = F, message = F, fig.width=12, fig.height=10}
+
+corrplot(cor(d), tl.cex = 0.8, tl.col = "red")
+         
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+#Le "corr plot" (ou diagramme de corrélation) est la représentation graphique qui nous a permis de visualiser les relations linéaires entre différentes variables. Nous pouvons remarquer des corrélation entre différents groupes de variables, par exemple les corrélation entre les variables qui sont reliées au vent (wind).
+
+#Différents modèles 
+#c'est un travail d'exploration en essayant plusieurs modèles basés sur nos propres hypothèses. Ces hypothèses trouvent leur origine dans des connaissances communes que nous avons et qui ne sont pas nécessairement vraies ou scientifiques, comme par exemple la croyance que le facteur le plus important dans les prévisions s'il va pleuvoir est la température et ainsi de sute. Puis le dernier modèle c'est le full_model qui va prendre en considération toutes les variables pour nous permettre de construire la première idée sur les variables les plus significatives. 
+
+
+
+
+```{r}
+
+model1 <- glm(pluie.demain ~ Temperature.daily.mean..2.m.above.gnd., family = "binomial", data = d_train)
+summary(model1)
+
+model2 <- glm(pluie.demain ~ Relative.Humidity.daily.mean..2.m.above.gnd., family = "binomial", data = d_train)
+summary(model2)
+
+model3 <- glm(pluie.demain ~ Mean.Sea.Level.Pressure.daily.mean..MSL., family = "binomial",
+             data = d_train)
+summary(model3)
+
+
+# Modèle prenant en considération toutes les variables: 
+
+full_model = glm(pluie.demain ~ ., family = "binomial", data = d_train)
+summary(full_model) 
+
+```
+
+#Conclusion :
+
+Les variables dont le coefficients sont siginificatifs dans le full_model :
+Mean.Sea.Level.Pressure.daily.mean..MSL. ; Wind.Direction.daily.mean..900.mb. ; Mean.Sea.Level.Pressure.daily.max..MSL. : Mean.Sea.Level.Pressure.daily.min..MSL. ; Wind.Speed.daily.min..10.m.above.gnd. ; High.Cloud.Cover.daily.max..high.cld.lay ; Temperature.daily.min..2.m.above.gnd.
+
+
+#Null model 
+#Ce modèle sans variables explicatives sert de point de référence pour évaluer l'ajout de variables indépendantes (dans la fonction step par exemple)
+
+```{r}
+null_model = glm(pluie.demain ~ 1 , family = "binomial", data = d_train)
+summary(null_model)
+```
+
+
+
+#Création de deux modèles avec la fonction step :
+
+```{r}
+final_model1 <- step(null_model, direction = "forward",scope = list(upper =full_model, lower = null_model))
+summary(final_model1)
+```
+
+
+```{r}
+
+final_model2 <- step(full_model, direction = "backward",scope = list(upper =full_model, lower = null_model) )
+summary(final_model2)
+```
+
+```{r}
+anova(final_model1,final_model2,test = "Chisq")
+
+compare_performance(final_model1,final_model2) %>%
+  as_tibble()
+```
+#Conclusion : 
+#En comparant les résultats fournis, on peut observer que "final_model2" présente des valeurs d'AIC et d'AICc plus faibles que celles de "final_model1". Donc, "final_model2" offre un meilleur ajustement aux données par rapport à "final_model1", pour cela nous allons choisir final_model2.
+
+```{r}
+
+library(leaps)
+choix_modele=regsubsets(pluie.demain ~ X + Year + Month + Temperature.daily.mean..2.m.above.gnd. + 
+    Mean.Sea.Level.Pressure.daily.mean..MSL. + Medium.Cloud.Cover.daily.mean..mid.cld.lay. + 
+    Wind.Speed.daily.mean..80.m.above.gnd. + Wind.Direction.daily.mean..900.mb. + 
+    Temperature.daily.min..2.m.above.gnd. + Mean.Sea.Level.Pressure.daily.max..MSL. + 
+    Mean.Sea.Level.Pressure.daily.min..MSL. + Total.Cloud.Cover.daily.max..sfc. + 
+    Total.Cloud.Cover.daily.min..sfc. + High.Cloud.Cover.daily.max..high.cld.lay. + 
+    Wind.Speed.daily.max..10.m.above.gnd. + Wind.Speed.daily.min..10.m.above.gnd. + 
+    Wind.Gust.daily.max..sfc., data = d_train )
+resume=summary(choix_modele)
+print(resume)
+
+```
+
+
+#Représentation graphique pour vérifier les variables significatives afin d'ajuster le modèle proposé si c'est nécessaire : 
+
+```{r echo = F, message = F, fig.width=12, fig.height=10}
+
+par(mfrow=c(2,2))
+plot(choix_modele,scale="r2")
+plot(choix_modele,scale="adjr2")
+plot(choix_modele,scale="Cp")
+plot(choix_modele,scale="bic")
+par(mfrow=c(1,1))
+
+print("R2"); print(resume$rsq);
+print("R2 ajuste"); print(resume$adjr2);
+print("Cp Mallows"); print(resume$cp);
+print("BIC"); print(resume$bic);
+
+
+```
+ 
+
+ 
+ 
+# Modèle basé sur les variables retenues d'après full_model2
+
+ 
+```{r}
+mod <- glm(pluie.demain ~ X + Year + Month + Temperature.daily.mean..2.m.above.gnd. + 
+    Mean.Sea.Level.Pressure.daily.mean..MSL. + Medium.Cloud.Cover.daily.mean..mid.cld.lay. + 
+    Wind.Speed.daily.mean..80.m.above.gnd. + Wind.Direction.daily.mean..900.mb. + 
+    Temperature.daily.min..2.m.above.gnd. + Mean.Sea.Level.Pressure.daily.max..MSL. + 
+    Mean.Sea.Level.Pressure.daily.min..MSL. + Total.Cloud.Cover.daily.max..sfc. + 
+    Total.Cloud.Cover.daily.min..sfc. + High.Cloud.Cover.daily.max..high.cld.lay. + 
+    Wind.Speed.daily.max..10.m.above.gnd. + Wind.Speed.daily.min..10.m.above.gnd. + 
+    Wind.Gust.daily.max..sfc., data = d_train)
+
+modele_choisi<- step(mod)
+pred = predict(mod, newdata = d_test, type = "response")
+pred <- pred>=0.5
+d_test$pred1 = pred
+
+
+
+
+matrice_confusion <- table(pred, d_test$pluie.demain)
+
+
+confusionMatrix(matrice_confusion) 
+
+```
+
+
+ 
+#Avec un nouveau model basé sur les graphiques
+#Nous avons dans ce cas enlevé quelques variables en se basant sur le résultats de la fonction regsubsets et les graphiques obtenues.
+
+```{r}
+
+mod1 <- glm(pluie.demain ~   Month + Temperature.daily.mean..2.m.above.gnd. 
+     + Medium.Cloud.Cover.daily.mean..mid.cld.lay. + Wind.Direction.daily.mean..900.mb. + 
+    Mean.Sea.Level.Pressure.daily.min..MSL.  + High.Cloud.Cover.daily.max..high.cld.lay. + 
+    Wind.Gust.daily.max..sfc., data = d_train)
+
+modele_choisi1<- step(mod1)
+pred_new = predict(mod1, newdata = d_test, type = "response")
+pred_new <- pred_new>=0.5
+d_test$pred2 = pred_new
+
+matrice_confusion <- table(pred, d_test$pluie.demain)
+
+
+confusionMatrix(matrice_confusion) 
+
+```
+
+#Conclusion :
+
+En comparant les chiffres, on remarque qu'on obtient le même pourcentage de précision pour les deux modèles (73.25%).
+
+
+#Prévision avec les données du fichier meteo.test
+#Nous allons utiliser le modèle mod1 qui a une précision de 73.25% puis nous allons ajouter la colonne de prévision pluie.demain pour compléter le tableau meter.test
+
+```{r echo=FALSE}
+d_meteo_test <- read.csv("meteo.test.csv")
+
+modele_choisi<- step(mod1)
+pred_meteo_test = predict(mod1, newdata = d_meteo_test, type = "response")
+pred_meteo_test <- pred_meteo_test>=0.5
+d_meteo_test$pluie.demain = pred_meteo_test
+
+
+
+write.csv(d_meteo_test, file="d_meteo_test.csv")
+```
